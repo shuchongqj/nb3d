@@ -1,124 +1,96 @@
-#
-# Simple DirectMedia Layer
-# Copyright (C) 1997-2016 Sam Lantinga <slouken@libsdl.org>
-#
-# This software is provided 'as-is', without any express or implied
-# warranty.  In no event will the authors be held liable for any damages
-# arising from the use of this software.
-#
-# Permission is granted to anyone to use this software for any purpose,
-# including commercial applications, and to alter it and redistribute it
-# freely, subject to the following restrictions:
-#
-# 1. The origin of this software must not be misrepresented; you must not
-# claim that you wrote the original software. If you use this software
-# in a product, an acknowledgment in the product documentation would be
-# appreciated but is not required.
-# 2. Altered source versions must be plainly marked as such, and must not be
-# misrepresented as being the original software.
-# 3. This notice may not be removed or altered from any source distribution.
-#
+macro(FindLibraryAndSONAME _LIB)
+  string(TOUPPER ${_LIB} _UPPERLNAME)
+  string(REGEX REPLACE "\\-" "_" _LNAME "${_UPPERLNAME}")
 
-# Modified by Yao Wei Tjong for Urho3D, the modified portion is licensed under below license
+  find_library(${_LNAME}_LIB ${_LIB})
+  if(${_LNAME}_LIB)
+    # reduce the library name for shared linking
 
-#
-# Copyright (c) 2008-2020 the Urho3D project.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-# THE SOFTWARE.
-#
+    get_filename_component(_LIB_REALPATH ${${_LNAME}_LIB} REALPATH)  # resolves symlinks
+    get_filename_component(_LIB_JUSTNAME ${_LIB_REALPATH} NAME)
 
-# Urho3D - replaced FindLibraryAndSONAME macro with get_soname macro
-macro (get_soname SONAME LIB)
-  if (${LIB})
-    get_filename_component (REALPATH ${${LIB}} REALPATH)
-    get_filename_component (BASENAME ${REALPATH} NAME)
-    if (BASENAME MATCHES \\.so)  # Extract soname from basename
-      string (REGEX REPLACE "(\\.so\\.[^.]+).*$" \\1 ${SONAME} "${BASENAME}")  # Stringify for string replacement
-    else ()
-      set (${SONAME} ${BASENAME})  # If it is not .so (e.g. .dylib) then use whatever the basename is
-    endif ()
-  endif ()
-endmacro ()
+    if(APPLE)
+      string(REGEX REPLACE "(\\.[0-9]*)\\.[0-9\\.]*dylib$" "\\1.dylib" _LIB_REGEXD "${_LIB_JUSTNAME}")
+    else()
+      string(REGEX REPLACE "(\\.[0-9]*)\\.[0-9\\.]*$" "\\1" _LIB_REGEXD "${_LIB_JUSTNAME}")
+    endif()
+
+    SET(_DEBUG_FindSONAME FALSE)
+    if(_DEBUG_FindSONAME)
+      message_warn("DYNLIB OUTPUTVAR: ${_LIB} ... ${_LNAME}_LIB")
+      message_warn("DYNLIB ORIGINAL LIB: ${_LIB} ... ${${_LNAME}_LIB}")
+      message_warn("DYNLIB REALPATH LIB: ${_LIB} ... ${_LIB_REALPATH}")
+      message_warn("DYNLIB JUSTNAME LIB: ${_LIB} ... ${_LIB_JUSTNAME}")
+      message_warn("DYNLIB REGEX'd LIB: ${_LIB} ... ${_LIB_REGEXD}")
+    endif()
+
+    message(STATUS "dynamic lib${_LIB} -> ${_LIB_REGEXD}")
+    set(${_LNAME}_LIB_SONAME ${_LIB_REGEXD})
+  endif()
+endmacro()
 
 macro(CheckDLOPEN)
-  # Urho3D - bug fix - to be consistent with the rest of the check macros here, only do the check when the feature is actually wanted
-  if (SDL_LOADSO)
-    # Urho3D - bypass the checks for Emscripten as they don't work but assume it is supported (https://github.com/kripken/emscripten/wiki/Linking#dlopen-dynamic-linking)
-    if (EMSCRIPTEN)
-      set (HAVE_DLOPEN TRUE)
-    else ()
-      # Urho3D - bug fix - use different variables for different checks because of CMake caches the result variable
-      check_function_exists(dlopen DLOPEN_FOUND)
-      if(NOT DLOPEN_FOUND)
-        foreach(_LIBNAME dl tdl)
-          check_library_exists("${_LIBNAME}" "dlopen" "" DLOPEN_LIB_${_LIBNAME}_FOUND)
-          if(DLOPEN_LIB_${_LIBNAME}_FOUND)
-            list(APPEND EXTRA_LIBS ${_LIBNAME})
-            set(_DLLIB ${_LIBNAME})
-            set(DLOPEN_FOUND TRUE)
-            break()
-          endif()
-        endforeach()
+  check_function_exists(dlopen HAVE_DLOPEN)
+  if(NOT HAVE_DLOPEN)
+    foreach(_LIBNAME dl tdl)
+      check_library_exists("${_LIBNAME}" "dlopen" "" DLOPEN_LIB)
+      if(DLOPEN_LIB)
+        list(APPEND EXTRA_LIBS ${_LIBNAME})
+        set(_DLLIB ${_LIBNAME})
+        set(HAVE_DLOPEN TRUE)
+        break()
       endif()
-      if(DLOPEN_FOUND)
-        if(_DLLIB)
-          set(CMAKE_REQUIRED_LIBRARIES ${_DLLIB})
-        endif()
-        check_c_source_compiles("
-           #include <dlfcn.h>
-           int main(int argc, char **argv) {
-             void *handle = dlopen(\"\", RTLD_NOW);
-             const char *loaderror = (char *) dlerror();
-           }" HAVE_DLOPEN)
-        set(CMAKE_REQUIRED_LIBRARIES)
-      endif()
-    endif ()
-    if(HAVE_DLOPEN)
-      set(SDL_LOADSO_DLOPEN 1)
-      set(HAVE_SDL_DLOPEN TRUE)
-      file(GLOB DLOPEN_SOURCES ${SDL2_SOURCE_DIR}/src/loadso/dlopen/*.c)
-      set(SOURCE_FILES ${SOURCE_FILES} ${DLOPEN_SOURCES})
-      set(HAVE_SDL_LOADSO TRUE)
+    endforeach()
+  endif()
+
+  if(HAVE_DLOPEN)
+    if(_DLLIB)
+      set(CMAKE_REQUIRED_LIBRARIES ${_DLLIB})
     endif()
-  endif ()
+    check_c_source_compiles("
+       #include <dlfcn.h>
+       int main(int argc, char **argv) {
+         void *handle = dlopen(\"\", RTLD_NOW);
+         const char *loaderror = (char *) dlerror();
+       }" HAVE_DLOPEN)
+    set(CMAKE_REQUIRED_LIBRARIES)
+  endif()
+
+  if (HAVE_DLOPEN)
+    set(SDL_LOADSO_DLOPEN 1)
+    set(HAVE_SDL_DLOPEN TRUE)
+    file(GLOB DLOPEN_SOURCES ${SDL2_SOURCE_DIR}/src/loadso/dlopen/*.c)
+    set(SOURCE_FILES ${SOURCE_FILES} ${DLOPEN_SOURCES})
+    set(HAVE_SDL_LOADSO TRUE)
+  endif()
 endmacro()
 
 # Requires:
 # - n/a
 macro(CheckOSS)
   if(OSS)
-    # Urho3D - bug fix - should use different variables for different checks, however, we replace the whole checks with find_package() approach for consistency sake
-    find_package (OSS)
+    set(OSS_HEADER_FILE "sys/soundcard.h")
+    check_c_source_compiles("
+        #include <sys/soundcard.h>
+        int main() { int arg = SNDCTL_DSP_SETFRAGMENT; }" OSS_FOUND)
+    if(NOT OSS_FOUND)
+      set(OSS_HEADER_FILE "soundcard.h")
+      check_c_source_compiles("
+          #include <soundcard.h>
+          int main() { int arg = SNDCTL_DSP_SETFRAGMENT; }" OSS_FOUND)
+    endif()
+
     if(OSS_FOUND)
-      include_directories (SYSTEM ${OSS_INCLUDE_DIRS})
-      if (OSS_LIBRARIES)
-        get_filename_component(NAME_WE ${OSS_LIBRARIES} NAME_WE)
-        string (REGEX REPLACE ^lib "" NAME_WE "${NAME_WE}")    # Stringify for string replacement
-        list(APPEND EXTRA_LIBS ${NAME_WE})
-      endif ()
       set(HAVE_OSS TRUE)
       file(GLOB OSS_SOURCES ${SDL2_SOURCE_DIR}/src/audio/dsp/*.c)
-      if(OSS_USE_WORKAROUND_HEADER)
+      if(OSS_HEADER_FILE STREQUAL "soundcard.h")
         set(SDL_AUDIO_DRIVER_OSS_SOUNDCARD_H 1)
       endif()
       set(SDL_AUDIO_DRIVER_OSS 1)
       set(SOURCE_FILES ${SOURCE_FILES} ${OSS_SOURCES})
+      if(NETBSD OR OPENBSD)
+        list(APPEND EXTRA_LIBS ossaudio)
+      endif()
       set(HAVE_SDL_AUDIO TRUE)
     endif()
   endif()
@@ -131,16 +103,11 @@ endmacro()
 # - HAVE_DLOPEN opt
 macro(CheckALSA)
   if(ALSA)
-    # Urho3D - bug fix - use the more trusted FindALSA module as it has been tested to work for both native and cross-compiling build
-    find_package (ALSA)
-    # todo: remove this fix when the minimum CMake version has been raised to higher than 2.8.7
-    # There is a bug in older version of FindALSA.cmake module where it erroneously include 'alsa' directory component into the variable
-    # For cross-compiling build to work correctly, this extra directory component must be removed
-    if (ALSA_INCLUDE_DIRS MATCHES .*/alsa)
-      get_filename_component (ALSA_INCLUDE_DIRS ${ALSA_INCLUDE_DIRS} PATH)
-    endif ()
-    if(ALSA_FOUND)
-      include_directories (SYSTEM ${ALSA_INCLUDE_DIRS})
+    CHECK_INCLUDE_FILE(alsa/asoundlib.h HAVE_ASOUNDLIB_H)
+    if(HAVE_ASOUNDLIB_H)
+      CHECK_LIBRARY_EXISTS(asound snd_pcm_recover "" HAVE_LIBASOUND)
+    endif()
+    if(HAVE_LIBASOUND)
       set(HAVE_ALSA TRUE)
       file(GLOB ALSA_SOURCES ${SDL2_SOURCE_DIR}/src/audio/alsa/*.c)
       set(SOURCE_FILES ${SOURCE_FILES} ${ALSA_SOURCES})
@@ -149,7 +116,7 @@ macro(CheckALSA)
         if(NOT HAVE_DLOPEN)
           message_warn("You must have SDL_LoadObject() support for dynamic ALSA loading")
         else()
-          get_soname (ASOUND_LIB_SONAME ALSA_LIBRARIES)
+          FindLibraryAndSONAME("asound")
           set(SDL_AUDIO_DRIVER_ALSA_DYNAMIC "\"${ASOUND_LIB_SONAME}\"")
           set(HAVE_ALSA_SHARED TRUE)
         endif()
@@ -162,31 +129,29 @@ macro(CheckALSA)
 endmacro()
 
 # Requires:
-# - n/a
+# - PkgCheckModules
 # Optional:
 # - PULSEAUDIO_SHARED opt
 # - HAVE_DLOPEN opt
 macro(CheckPulseAudio)
   if(PULSEAUDIO)
-    # Urho3D - bug fix - do not use pkg-config tool for detection as it only works for host environment and not for rooted environment when cross-compiling
-    find_package (PulseAudio)
-    if(PULSEAUDIO_FOUND)
-      include_directories (SYSTEM ${PULSEAUDIO_INCLUDE_DIRS})
+    pkg_check_modules(PKG_PULSEAUDIO libpulse-simple)
+    if(PKG_PULSEAUDIO_FOUND)
       set(HAVE_PULSEAUDIO TRUE)
       file(GLOB PULSEAUDIO_SOURCES ${SDL2_SOURCE_DIR}/src/audio/pulseaudio/*.c)
       set(SOURCE_FILES ${SOURCE_FILES} ${PULSEAUDIO_SOURCES})
       set(SDL_AUDIO_DRIVER_PULSEAUDIO 1)
-      # Urho3D - commented out appending EXTRA_CFLAGS for compiling with PulseAudio, there should not be any except "-D_REENTRANT" which is also redundant for our configuration setup as we use '-pthread' compiler flags to do the right things automatically
+      list(APPEND EXTRA_CFLAGS ${PKG_PULSEAUDIO_CFLAGS})
       if(PULSEAUDIO_SHARED)
         if(NOT HAVE_DLOPEN)
           message_warn("You must have SDL_LoadObject() support for dynamic PulseAudio loading")
         else()
-          get_soname (PULSE_SIMPLE_LIB_SONAME PULSEAUDIO_LIBRARIES)
+          FindLibraryAndSONAME("pulse-simple")
           set(SDL_AUDIO_DRIVER_PULSEAUDIO_DYNAMIC "\"${PULSE_SIMPLE_LIB_SONAME}\"")
           set(HAVE_PULSEAUDIO_SHARED TRUE)
         endif()
       else()
-        list (APPEND EXTRA_LIBS pulse-simple pulse)
+        list(APPEND EXTRA_LDFLAGS ${PKG_PULSEAUDIO_LDFLAGS})
       endif()
       set(HAVE_SDL_AUDIO TRUE)
     endif()
@@ -194,30 +159,29 @@ macro(CheckPulseAudio)
 endmacro()
 
 # Requires:
-# - n/a
+# - PkgCheckModules
 # Optional:
 # - JACK_SHARED opt
 # - HAVE_DLOPEN opt
 macro(CheckJACK)
   if(JACK)
-    # Urho3D - bug fix - do not use pkg-config tool for detection as it only works for host environment and not for rooted environment when cross-compiling
-    find_package (Jack)
-    if(JACK_FOUND)
-      include_directories (SYSTEM ${JACK_INCLUDE_DIRS})
+    pkg_check_modules(PKG_JACK jack)
+    if(PKG_JACK_FOUND)
       set(HAVE_JACK TRUE)
       file(GLOB JACK_SOURCES ${SDL2_SOURCE_DIR}/src/audio/jack/*.c)
       set(SOURCE_FILES ${SOURCE_FILES} ${JACK_SOURCES})
       set(SDL_AUDIO_DRIVER_JACK 1)
+      list(APPEND EXTRA_CFLAGS ${PKG_JACK_CFLAGS})
       if(JACK_SHARED)
         if(NOT HAVE_DLOPEN)
           message_warn("You must have SDL_LoadObject() support for dynamic JACK audio loading")
         else()
-          get_soname (JACK_LIB_SONAME JACK_LIBRARIES)
+          FindLibraryAndSONAME("jack")
           set(SDL_AUDIO_DRIVER_JACK_DYNAMIC "\"${JACK_LIB_SONAME}\"")
           set(HAVE_JACK_SHARED TRUE)
         endif()
       else()
-        list (APPEND EXTRA_LIBS jack)
+        list(APPEND EXTRA_LDFLAGS ${PKG_JACK_LDFLAGS})
       endif()
       set(HAVE_SDL_AUDIO TRUE)
     endif()
@@ -231,24 +195,23 @@ endmacro()
 # - HAVE_DLOPEN opt
 macro(CheckESD)
   if(ESD)
-    # Urho3D - bug fix - do not use pkg-config tool for detection as it only works for host environment and not for rooted environment when cross-compiling
-    find_package (Esound)
-    if(ESOUND_FOUND)
-      include_directories (SYSTEM ${ESOUND_INCLUDE_DIRS})
+    pkg_check_modules(PKG_ESD esound)
+    if(PKG_ESD_FOUND)
       set(HAVE_ESD TRUE)
       file(GLOB ESD_SOURCES ${SDL2_SOURCE_DIR}/src/audio/esd/*.c)
       set(SOURCE_FILES ${SOURCE_FILES} ${ESD_SOURCES})
       set(SDL_AUDIO_DRIVER_ESD 1)
+      list(APPEND EXTRA_CFLAGS ${PKG_ESD_CFLAGS})
       if(ESD_SHARED)
         if(NOT HAVE_DLOPEN)
           message_warn("You must have SDL_LoadObject() support for dynamic ESD loading")
         else()
-          get_soname (ESD_LIB_SONAME ESOUND_LIBRARIES)
+          FindLibraryAndSONAME(esd)
           set(SDL_AUDIO_DRIVER_ESD_DYNAMIC "\"${ESD_LIB_SONAME}\"")
           set(HAVE_ESD_SHARED TRUE)
         endif()
       else()
-        list (APPEND EXTRA_LIBS esd)
+        list(APPEND EXTRA_LDFLAGS ${PKG_ESD_LDFLAGS})
       endif()
       set(HAVE_SDL_AUDIO TRUE)
     endif()
@@ -262,10 +225,13 @@ endmacro()
 # - HAVE_DLOPEN opt
 macro(CheckARTS)
   if(ARTS)
-    # Urho3D - bug fix - do not use (host) arts-config tool for detection as it only works for host environment and not for rooted environment when cross-compiling
-    find_package (aRts)
-    if(ARTS_FOUND)
-      include_directories (SYSTEM ${ARTS_INCLUDE_DIRS})
+    find_program(ARTS_CONFIG arts-config)
+    if(ARTS_CONFIG)
+      execute_process(CMD_ARTSCFLAGS ${ARTS_CONFIG} --cflags
+        OUTPUT_VARIABLE ARTS_CFLAGS OUTPUT_STRIP_TRAILING_WHITESPACE)
+      list(APPEND EXTRA_CFLAGS ${ARTS_CFLAGS})
+      execute_process(CMD_ARTSLIBS ${ARTS_CONFIG} --libs
+        OUTPUT_VARIABLE ARTS_LIBS OUTPUT_STRIP_TRAILING_WHITESPACE)
       file(GLOB ARTS_SOURCES ${SDL2_SOURCE_DIR}/src/audio/arts/*.c)
       set(SOURCE_FILES ${SOURCE_FILES} ${ARTS_SOURCES})
       set(SDL_AUDIO_DRIVER_ARTS 1)
@@ -274,12 +240,13 @@ macro(CheckARTS)
         if(NOT HAVE_DLOPEN)
           message_warn("You must have SDL_LoadObject() support for dynamic ARTS loading")
         else()
-          get_soname (ARTSC_LIB_SONAME ARTS_LIBRARIES)
+          # TODO
+          FindLibraryAndSONAME(artsc)
           set(SDL_AUDIO_DRIVER_ARTS_DYNAMIC "\"${ARTSC_LIB_SONAME}\"")
           set(HAVE_ARTS_SHARED TRUE)
         endif()
       else()
-        list (APPEND EXTRA_LIBS artsc)
+        list(APPEND EXTRA_LDFLAGS ${ARTS_LIBS})
       endif()
       set(HAVE_SDL_AUDIO TRUE)
     endif()
@@ -293,10 +260,10 @@ endmacro()
 # - HAVE_DLOPEN opt
 macro(CheckNAS)
   if(NAS)
-    # Urho3D - bug fix - do not use check_include_file() for detection as it only works for host environment and not for rooted environment when cross-compiling
-    find_package (NetworkAudioSystem)
-    if(NAS_FOUND)
-      include_directories (SYSTEM ${NAS_INCLUDE_DIRS})
+    # TODO: set include paths properly, so the NAS headers are found
+    check_include_file(audio/audiolib.h HAVE_NAS_H)
+    find_library(D_NAS_LIB audio)
+    if(HAVE_NAS_H AND D_NAS_LIB)
       set(HAVE_NAS TRUE)
       file(GLOB NAS_SOURCES ${SDL2_SOURCE_DIR}/src/audio/nas/*.c)
       set(SOURCE_FILES ${SOURCE_FILES} ${NAS_SOURCES})
@@ -305,12 +272,12 @@ macro(CheckNAS)
         if(NOT HAVE_DLOPEN)
           message_warn("You must have SDL_LoadObject() support for dynamic NAS loading")
         else()
-          get_soname (AUDIO_LIB_SONAME NAS_LIBRARIES)
+          FindLibraryAndSONAME("audio")
           set(SDL_AUDIO_DRIVER_NAS_DYNAMIC "\"${AUDIO_LIB_SONAME}\"")
           set(HAVE_NAS_SHARED TRUE)
         endif()
       else()
-        list (APPEND EXTRA_LIBS audio)
+        list(APPEND EXTRA_LIBS ${D_NAS_LIB})
       endif()
       set(HAVE_SDL_AUDIO TRUE)
     endif()
@@ -324,10 +291,10 @@ endmacro()
 # - HAVE_DLOPEN opt
 macro(CheckSNDIO)
   if(SNDIO)
-    # Urho3D - bug fix - do not use check_include_file() for detection as it only works for host environment and not for rooted environment when cross-compiling
-    find_package (RoarAudio)
-    if(SNDIO_FOUND)
-      include_directories (SYSTEM ${SNDIO_INCLUDE_DIRS})
+    # TODO: set include paths properly, so the sndio headers are found
+    check_include_file(sndio.h HAVE_SNDIO_H)
+    find_library(D_SNDIO_LIB sndio)
+    if(HAVE_SNDIO_H AND D_SNDIO_LIB)
       set(HAVE_SNDIO TRUE)
       file(GLOB SNDIO_SOURCES ${SDL2_SOURCE_DIR}/src/audio/sndio/*.c)
       set(SOURCE_FILES ${SOURCE_FILES} ${SNDIO_SOURCES})
@@ -336,12 +303,12 @@ macro(CheckSNDIO)
         if(NOT HAVE_DLOPEN)
           message_warn("You must have SDL_LoadObject() support for dynamic sndio loading")
         else()
-          get_soname (SNDIO_LIB_SONAME SNDIO_LIBRARIES)
+          FindLibraryAndSONAME("sndio")
           set(SDL_AUDIO_DRIVER_SNDIO_DYNAMIC "\"${SNDIO_LIB_SONAME}\"")
           set(HAVE_SNDIO_SHARED TRUE)
         endif()
       else()
-        list(APPEND EXTRA_LIBS sndio)
+        list(APPEND EXTRA_LIBS ${D_SNDIO_LIB})
       endif()
       set(HAVE_SDL_AUDIO TRUE)
     endif()
@@ -349,30 +316,29 @@ macro(CheckSNDIO)
 endmacro()
 
 # Requires:
-# - n/a
+# - PkgCheckModules
 # Optional:
 # - FUSIONSOUND_SHARED opt
 # - HAVE_DLOPEN opt
 macro(CheckFusionSound)
   if(FUSIONSOUND)
-    # Urho3D - bug fix - do not use pkg-config tool for detection as it only works for host environment and not for rooted environment when cross-compiling
-    find_package (FusionSound 1.0.0)
-    if(FUSIONSOUND_FOUND)
-      include_directories (SYSTEM ${FUSIONSOUND_INCLUDE_DIRS})
+    pkg_check_modules(PKG_FUSIONSOUND fusionsound>=1.0.0)
+    if(PKG_FUSIONSOUND_FOUND)
       set(HAVE_FUSIONSOUND TRUE)
       file(GLOB FUSIONSOUND_SOURCES ${SDL2_SOURCE_DIR}/src/audio/fusionsound/*.c)
       set(SOURCE_FILES ${SOURCE_FILES} ${FUSIONSOUND_SOURCES})
       set(SDL_AUDIO_DRIVER_FUSIONSOUND 1)
+      list(APPEND EXTRA_CFLAGS ${PKG_FUSIONSOUND_CFLAGS})
       if(FUSIONSOUND_SHARED)
         if(NOT HAVE_DLOPEN)
           message_warn("You must have SDL_LoadObject() support for dynamic FusionSound loading")
         else()
-          get_soname (FUSIONSOUND_LIB_SONAME FUSIONSOUND_LIBRARIES)
+          FindLibraryAndSONAME("fusionsound")
           set(SDL_AUDIO_DRIVER_FUSIONSOUND_DYNAMIC "\"${FUSIONSOUND_LIB_SONAME}\"")
           set(HAVE_FUSIONSOUND_SHARED TRUE)
         endif()
       else()
-        list (APPEND EXTRA_LIBS fusionsound)
+        list(APPEND EXTRA_LDFLAGS ${PKG_FUSIONSOUND_LDFLAGS})
       endif()
       set(HAVE_SDL_AUDIO TRUE)
     endif()
@@ -386,21 +352,19 @@ endmacro()
 # - HAVE_DLOPEN opt
 macro(CheckLibSampleRate)
   if(LIBSAMPLERATE)
-    # Urho3D - use custom CMake module to find the audio driver like the rest for consistency sake
-    find_package (SecretRabbitCode)
-    if(SECRETRABBITCODE_FOUND)
-      include_directories (SYSTEM ${SECRETRABBITCODE_INCLUDE_DIRS})
-      set (HAVE_LIBSAMPLERATE_H TRUE)
+    check_include_file(samplerate.h HAVE_LIBSAMPLERATE_H)
+    if(HAVE_LIBSAMPLERATE_H)
+      set(HAVE_LIBSAMPLERATE TRUE)
       if(LIBSAMPLERATE_SHARED)
         if(NOT HAVE_DLOPEN)
           message_warn("You must have SDL_LoadObject() support for dynamic libsamplerate loading")
         else()
-          get_soname (SAMPLERATE_LIB_SONAME SECRETRABBITCODE_LIBRARIES)
+          FindLibraryAndSONAME("samplerate")
           set(SDL_LIBSAMPLERATE_DYNAMIC "\"${SAMPLERATE_LIB_SONAME}\"")
           set(HAVE_LIBSAMPLERATE_SHARED TRUE)
         endif()
       else()
-        list (APPEND EXTRA_LIBS samplerate)
+        list(APPEND EXTRA_LDFLAGS -lsamplerate)
       endif()
     endif()
   endif()
@@ -413,37 +377,41 @@ endmacro()
 # - HAVE_DLOPEN opt
 macro(CheckX11)
   if(VIDEO_X11)
-    # Urho3D - bug fix - in order to make these checks below work on both native and cross-compiling builds we need to add the '-shared' compiler flags to ensure the linker does not attempt to statically link against X11 shared libs which would otherwise fail the test when in cross-compiling mode
-    set(CMAKE_REQUIRED_FLAGS "-fPIC -shared ${ORIG_CMAKE_REQUIRED_FLAGS}")
-    foreach (NAME X11 Xext Xcursor Xinerama Xi Xrandr Xrender Xss Xxf86vm)
-      string (TOUPPER ${NAME} UPCASE_NAME)
-      string (REGEX REPLACE \\..+$ "" UPCASE_NAME "${UPCASE_NAME}")  # Stringify for string replacement
-      find_library (${UPCASE_NAME}_LIB ${NAME})
-      get_soname (${UPCASE_NAME}_LIB_SONAME ${UPCASE_NAME}_LIB)
-    endforeach ()
+    foreach(_LIB X11 Xext Xcursor Xinerama Xi Xrandr Xrender Xss Xxf86vm)
+        FindLibraryAndSONAME("${_LIB}")
+    endforeach()
 
-    # Urho3D - commented out setting of EXTRA_CFLAGS based on the search result for X11/Xlib.h using the default search path (if it is found then it is in default path anyway so no point to add it into compiler header search path again)
-    # Urho3D - add check for Xdbe extension
+    find_path(X_INCLUDEDIR X11/Xlib.h
+        /usr/pkg/xorg/include
+        /usr/X11R6/include
+        /usr/X11R7/include
+        /usr/local/include/X11
+        /usr/include/X11
+        /usr/openwin/include
+        /usr/openwin/share/include
+        /opt/graphics/OpenGL/include
+        /opt/X11/include
+    )
+
+    if(X_INCLUDEDIR)
+      list(APPEND EXTRA_CFLAGS "-I${X_INCLUDEDIR}")
+      list(APPEND CMAKE_REQUIRED_INCLUDES "${X_INCLUDEDIR}")
+    endif()
 
     check_include_file(X11/Xcursor/Xcursor.h HAVE_XCURSOR_H)
     check_include_file(X11/extensions/Xinerama.h HAVE_XINERAMA_H)
     check_include_file(X11/extensions/XInput2.h HAVE_XINPUT_H)
     check_include_file(X11/extensions/Xrandr.h HAVE_XRANDR_H)
     check_include_file(X11/extensions/Xrender.h HAVE_XRENDER_H)
-    check_include_file(X11/extensions/shape.h HAVE_XSHAPE_H)
     check_include_file(X11/extensions/scrnsaver.h HAVE_XSS_H)
-    check_include_files("X11/Xlib.h;X11/Xproto.h;X11/extensions/Xdbe.h" HAVE_XDBE_H)
-    check_include_files("X11/Xlib.h;X11/Xproto.h;X11/extensions/Xext.h" HAVE_XEXT_H)
+    check_include_file(X11/extensions/shape.h HAVE_XSHAPE_H)
     check_include_files("X11/Xlib.h;X11/extensions/xf86vmode.h" HAVE_XF86VM_H)
+    check_include_files("X11/Xlib.h;X11/Xproto.h;X11/extensions/Xext.h" HAVE_XEXT_H)
 
     if(X11_LIB)
       if(NOT HAVE_XEXT_H)
         message_error("Missing Xext.h, maybe you need to install the libxext-dev package?")
       endif()
-
-      if (HAVE_XDBE_H)
-        set(SDL_VIDEO_DRIVER_X11_XDBE 1)
-      endif ()
 
       set(HAVE_VIDEO_X11 TRUE)
       set(HAVE_SDL_VIDEO TRUE)
@@ -458,11 +426,9 @@ macro(CheckX11)
 
       check_function_exists("shmat" HAVE_SHMAT)
       if(NOT HAVE_SHMAT)
-        # Urho3D - bug fix - use different variables for different checks because of CMake caches the result variable
-        check_library_exists(ipc shmat "" HAVE_SHMAT_IN_IPC)
-        if(HAVE_SHMAT_IN_IPC)
+        check_library_exists(ipc shmat "" HAVE_SHMAT)
+        if(HAVE_SHMAT)
           list(APPEND EXTRA_LIBS ipc)
-          set (HAVE_SHMAT TRUE)
         endif()
         if(NOT HAVE_SHMAT)
           add_definitions(-DNO_SHARED_MEMORY)
@@ -481,8 +447,7 @@ macro(CheckX11)
           set(SDL_VIDEO_DRIVER_X11_DYNAMIC "\"${X11_LIB_SONAME}\"")
           set(SDL_VIDEO_DRIVER_X11_DYNAMIC_XEXT "\"${XEXT_LIB_SONAME}\"")
         else()
-          # Urho3D - bug fix - the EXTRA_LIBS is list of library names (not the fully-qualified path to the library itself)
-          list (APPEND EXTRA_LIBS X11 Xext)
+          list(APPEND EXTRA_LIBS ${X11_LIB} ${XEXT_LIB})
         endif()
       endif()
 
@@ -518,7 +483,7 @@ macro(CheckX11)
         if(HAVE_X11_SHARED AND XCURSOR_LIB)
           set(SDL_VIDEO_DRIVER_X11_DYNAMIC_XCURSOR "\"${XCURSOR_LIB_SONAME}\"")
         else()
-          list (APPEND EXTRA_LIBS Xcursor)
+          list(APPEND EXTRA_LIBS ${XCURSOR_LIB})
         endif()
         set(SDL_VIDEO_DRIVER_X11_XCURSOR 1)
       endif()
@@ -528,7 +493,7 @@ macro(CheckX11)
         if(HAVE_X11_SHARED AND XINERAMA_LIB)
           set(SDL_VIDEO_DRIVER_X11_DYNAMIC_XINERAMA "\"${XINERAMA_LIB_SONAME}\"")
         else()
-          list (APPEND EXTRA_LIBS Xinerama)
+          list(APPEND EXTRA_LIBS ${XINERAMA_LIB})
         endif()
         set(SDL_VIDEO_DRIVER_X11_XINERAMA 1)
       endif()
@@ -538,7 +503,7 @@ macro(CheckX11)
         if(HAVE_X11_SHARED AND XI_LIB)
           set(SDL_VIDEO_DRIVER_X11_DYNAMIC_XINPUT2 "\"${XI_LIB_SONAME}\"")
         else()
-          list (APPEND EXTRA_LIBS Xi)
+          list(APPEND EXTRA_LIBS ${XI_LIB})
         endif()
         set(SDL_VIDEO_DRIVER_X11_XINPUT2 1)
 
@@ -563,7 +528,7 @@ macro(CheckX11)
         if(HAVE_X11_SHARED AND XRANDR_LIB)
           set(SDL_VIDEO_DRIVER_X11_DYNAMIC_XRANDR "\"${XRANDR_LIB_SONAME}\"")
         else()
-          list (APPEND EXTRA_LIBS Xrandr)
+          list(APPEND EXTRA_LIBS ${XRANDR_LIB})
         endif()
         set(SDL_VIDEO_DRIVER_X11_XRANDR 1)
         set(HAVE_VIDEO_X11_XRANDR TRUE)
@@ -573,7 +538,7 @@ macro(CheckX11)
         if(HAVE_X11_SHARED AND XSS_LIB)
           set(SDL_VIDEO_DRIVER_X11_DYNAMIC_XSS "\"${XSS_LIB_SONAME}\"")
         else()
-          list (APPEND EXTRA_LIBS Xss)
+          list(APPEND EXTRA_LIBS ${XSS_LIB})
         endif()
         set(SDL_VIDEO_DRIVER_X11_XSCRNSAVER 1)
         set(HAVE_VIDEO_X11_XSCRNSAVER TRUE)
@@ -588,14 +553,13 @@ macro(CheckX11)
         if(HAVE_X11_SHARED AND XXF86VM_LIB)
           set(SDL_VIDEO_DRIVER_X11_DYNAMIC_XVIDMODE "\"${XXF86VM_LIB_SONAME}\"")
         else()
-          list (APPEND EXTRA_LIBS Xxf86vm)
+          list(APPEND EXTRA_LIBS ${XXF86VM_LIB})
         endif()
         set(SDL_VIDEO_DRIVER_X11_XVIDMODE 1)
         set(HAVE_VIDEO_X11_XVM TRUE)
       endif()
 
       set(CMAKE_REQUIRED_LIBRARIES)
-      set(CMAKE_REQUIRED_FLAGS ${ORIG_CMAKE_REQUIRED_FLAGS})
     endif()
   endif()
 endmacro()
@@ -623,15 +587,35 @@ endmacro()
 
 # Requires:
 # - EGL
+# - PkgCheckModules
 # Optional:
 # - WAYLAND_SHARED opt
 # - HAVE_DLOPEN opt
 macro(CheckWayland)
   if(VIDEO_WAYLAND)
-    # Urho3D - bug fix - do not use pkg-config tool for detection as it only works for host environment and not for rooted environment when cross-compiling
-    find_package (Wayland)
+    pkg_check_modules(WAYLAND wayland-client wayland-scanner wayland-protocols wayland-egl wayland-cursor egl xkbcommon)
+
     if(WAYLAND_FOUND)
-      include_directories (SYSTEM ${WAYLAND_INCLUDE_DIRS})
+      execute_process(
+        COMMAND ${PKG_CONFIG_EXECUTABLE} --variable=wayland_scanner wayland-scanner
+        WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}"
+        RESULT_VARIABLE WAYLAND_SCANNER_RC
+        OUTPUT_VARIABLE WAYLAND_SCANNER
+        ERROR_QUIET
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+      )
+      if(NOT WAYLAND_SCANNER_RC EQUAL 0)
+        set(WAYLAND_FOUND FALSE)
+      endif()
+    endif()
+
+    if(WAYLAND_FOUND)
+      link_directories(
+          ${WAYLAND_LIBRARY_DIRS}
+      )
+      include_directories(
+          ${WAYLAND_INCLUDE_DIRS}
+      )
       set(HAVE_VIDEO_WAYLAND TRUE)
       set(HAVE_SDL_VIDEO TRUE)
 
@@ -656,10 +640,10 @@ macro(CheckWayland)
         if(NOT HAVE_DLOPEN)
           message_warn("You must have SDL_LoadObject() support for dynamic Wayland loading")
         else()
-          get_soname (WAYLAND_CLIENT_LIB_SONAME WAYLAND_CLIENT)
-          get_soname (WAYLAND_EGL_LIB_SONAME WAYLAND_EGL)
-          get_soname (WAYLAND_CURSOR_LIB_SONAME WAYLAND_CURSOR)
-          get_soname (XKBCOMMON_LIB_SONAME XKB)
+          FindLibraryAndSONAME(wayland-client)
+          FindLibraryAndSONAME(wayland-egl)
+          FindLibraryAndSONAME(wayland-cursor)
+          FindLibraryAndSONAME(xkbcommon)
           set(SDL_VIDEO_DRIVER_WAYLAND_DYNAMIC "\"${WAYLAND_CLIENT_LIB_SONAME}\"")
           set(SDL_VIDEO_DRIVER_WAYLAND_DYNAMIC_EGL "\"${WAYLAND_EGL_LIB_SONAME}\"")
           set(SDL_VIDEO_DRIVER_WAYLAND_DYNAMIC_CURSOR "\"${WAYLAND_CURSOR_LIB_SONAME}\"")
@@ -667,43 +651,57 @@ macro(CheckWayland)
           set(HAVE_WAYLAND_SHARED TRUE)
         endif()
       else()
-        list (APPEND EXTRA_LIBS wayland-client)
+        set(EXTRA_LIBS ${WAYLAND_LIBRARIES} ${EXTRA_LIBS})
       endif()
 
       set(SDL_VIDEO_DRIVER_WAYLAND 1)
-      set(SDL_VIDEO_OPENGL_EGL 1)
     endif()
   endif()
 endmacro()
 
-# Urho3D - commented out CheckCOCOA macro as it does not perform any check at all, moved the code to SDL's CMakeLists.txt
-
 # Requires:
 # - n/a
+#
+macro(CheckCOCOA)
+  if(VIDEO_COCOA)
+    if(APPLE) # Apple always has Cocoa.
+      set(HAVE_VIDEO_COCOA TRUE)
+    endif()
+    if(HAVE_VIDEO_COCOA)
+      file(GLOB COCOA_SOURCES ${SDL2_SOURCE_DIR}/src/video/cocoa/*.m)
+      set_source_files_properties(${COCOA_SOURCES} PROPERTIES LANGUAGE C)
+      set(SOURCE_FILES ${SOURCE_FILES} ${COCOA_SOURCES})
+      set(SDL_VIDEO_DRIVER_COCOA 1)
+      set(HAVE_SDL_VIDEO TRUE)
+    endif()
+  endif()
+endmacro()
+
+# Requires:
+# - PkgCheckModules
 # Optional:
 # - DIRECTFB_SHARED opt
 # - HAVE_DLOPEN opt
 macro(CheckDirectFB)
   if(VIDEO_DIRECTFB)
-    # Urho3D - bug fix - do not use pkg-config tool for detection as it only works for host environment and not for rooted environment when cross-compiling
-    find_package (DirectFB 1.0.0)
-    if(DIRECTFB_FOUND)
-      include_directories (SYSTEM ${DIRECTFB_INCLUDE_DIRS})
+    pkg_check_modules(PKG_DIRECTFB directfb>=1.0.0)
+    if(PKG_DIRECTFB_FOUND)
       set(HAVE_VIDEO_DIRECTFB TRUE)
       file(GLOB DIRECTFB_SOURCES ${SDL2_SOURCE_DIR}/src/video/directfb/*.c)
       set(SOURCE_FILES ${SOURCE_FILES} ${DIRECTFB_SOURCES})
       set(SDL_VIDEO_DRIVER_DIRECTFB 1)
       set(SDL_VIDEO_RENDER_DIRECTFB 1)
+      list(APPEND EXTRA_CFLAGS ${PKG_DIRECTFB_CFLAGS})
       if(DIRECTFB_SHARED)
         if(NOT HAVE_DLOPEN)
           message_warn("You must have SDL_LoadObject() support for dynamic DirectFB loading")
         else()
-          get_soname (DIRECTFB_LIB_SONAME DIRECTFB_LIBRARIES)
+          FindLibraryAndSONAME("directfb")
           set(SDL_VIDEO_DRIVER_DIRECTFB_DYNAMIC "\"${DIRECTFB_LIB_SONAME}\"")
           set(HAVE_DIRECTFB_SHARED TRUE)
         endif()
       else()
-        list(APPEND EXTRA_LIBS directfb)
+        list(APPEND EXTRA_LDFLAGS ${PKG_DIRECTFB_LDFLAGS})
       endif()
       set(HAVE_SDL_VIDEO TRUE)
     endif()
@@ -714,15 +712,6 @@ endmacro()
 # - n/a
 macro(CheckVivante)
   if(VIDEO_VIVANTE)
-    # Urho3D - bug fix - when cross-compiling the headers are rooted, either use "--sysroot" compiler flag or use CMAKE_REQUIRED_INCLUDES (e.g. on RPI) to cater for it
-    set (CMAKE_REQUIRED_INCLUDES_VIVANTE_SAVED ${CMAKE_REQUIRED_INCLUDES})
-    if (CMAKE_CROSSCOMPILING AND NOT "${CMAKE_C_FLAGS} ${CMAKE_REQUIRED_FLAGS}" MATCHES --sysroot)
-      find_path (VIVANTE_INCLUDE_DIRS NAMES gc_vdk.h EGL/eglvivante.h)
-      if (VIVANTE_INCLUDE_DIRS)
-        # Assume the header search path has not been adjusted elsewhere yet, there is no harm anyway when a same entry is added twice into the list
-        list (APPEND CMAKE_REQUIRED_INCLUDES ${VIVANTE_INCLUDE_DIRS})
-      endif ()
-    endif ()
     check_c_source_compiles("
         #include <gc_vdk.h>
         int main(int argc, char** argv) {}" HAVE_VIDEO_VIVANTE_VDK)
@@ -746,35 +735,22 @@ macro(CheckVivante)
         list(APPEND EXTRA_LIBS EGL)
       endif(HAVE_VIDEO_VIVANTE_VDK)
     endif(HAVE_VIDEO_VIVANTE_VDK OR HAVE_VIDEO_VIVANTE_EGL_FB)
-    set (CMAKE_REQUIRED_INCLUDES ${CMAKE_REQUIRED_INCLUDES_VIVANTE_SAVED})
   endif(VIDEO_VIVANTE)
 endmacro(CheckVivante)
 
 # Requires:
 # - nada
-# Urho3D - rename the macro to be generic OpenGL check and make it also work for OSX platform
-macro(CheckOpenGL)
+macro(CheckOpenGLX11)
   if(VIDEO_OPENGL)
-    if (APPLE)
-      check_c_source_compiles ("
-        #include <OpenGL/OpenGL.h>
-        #include <OpenGL/CGLRenderers.h>
-        int main(int argc, char** argv) {}" HAVE_VIDEO_OPENGL)
-    else ()
-      check_c_source_compiles("
+    check_c_source_compiles("
         #include <GL/gl.h>
         #include <GL/glx.h>
         int main(int argc, char** argv) {}" HAVE_VIDEO_OPENGL)
-    endif ()
 
     if(HAVE_VIDEO_OPENGL)
       set(HAVE_VIDEO_OPENGL TRUE)
       set(SDL_VIDEO_OPENGL 1)
-      if (APPLE)
-        set (SDL_VIDEO_OPENGL_CGL 1)
-      else ()
-        set(SDL_VIDEO_OPENGL_GLX 1)
-      endif ()
+      set(SDL_VIDEO_OPENGL_GLX 1)
       set(SDL_VIDEO_RENDER_OGL 1)
     endif()
   endif()
@@ -782,8 +758,7 @@ endmacro()
 
 # Requires:
 # - nada
-# Urho3D - rename the macro to be generic OpenGLES check and make it also work for iOS/tvOS platform
-macro(CheckOpenGLES)
+macro(CheckOpenGLESX11)
   if(VIDEO_OPENGLES)
     check_c_source_compiles("
         #define EGL_API_FB
@@ -810,6 +785,7 @@ macro(CheckOpenGLES)
         set(SDL_VIDEO_OPENGL_ES2 1)
         set(SDL_VIDEO_RENDER_OGL_ES2 1)
     endif()
+
   endif()
 endmacro()
 
@@ -817,18 +793,59 @@ endmacro()
 # - nada
 # Optional:
 # - THREADS opt
+# Sets:
+# PTHREAD_CFLAGS
+# PTHREAD_LIBS
 macro(CheckPTHREAD)
   if(PTHREADS)
-    # Urho3D - remove hardcoding of pthread-related compiler and linker flags for each platform
-    set(CMAKE_REQUIRED_FLAGS "-pthread ${ORIG_CMAKE_REQUIRED_FLAGS}")   # Android does not need this flag but it does no harm (i.e. appears to be no-op on Android)
+    if(ANDROID)
+      # the android libc provides built-in support for pthreads, so no
+      # additional linking or compile flags are necessary
+    elseif(LINUX)
+      set(PTHREAD_CFLAGS "-D_REENTRANT")
+      set(PTHREAD_LDFLAGS "-pthread")
+    elseif(BSDI)
+      set(PTHREAD_CFLAGS "-D_REENTRANT -D_THREAD_SAFE")
+      set(PTHREAD_LDFLAGS "")
+    elseif(DARWIN)
+      set(PTHREAD_CFLAGS "-D_THREAD_SAFE")
+      # causes Carbon.p complaints?
+      # set(PTHREAD_CFLAGS "-D_REENTRANT -D_THREAD_SAFE")
+      set(PTHREAD_LDFLAGS "")
+    elseif(FREEBSD)
+      set(PTHREAD_CFLAGS "-D_REENTRANT -D_THREAD_SAFE")
+      set(PTHREAD_LDFLAGS "-pthread")
+    elseif(NETBSD)
+      set(PTHREAD_CFLAGS "-D_REENTRANT -D_THREAD_SAFE")
+      set(PTHREAD_LDFLAGS "-lpthread")
+    elseif(OPENBSD)
+      set(PTHREAD_CFLAGS "-D_REENTRANT")
+      set(PTHREAD_LDFLAGS "-pthread")
+    elseif(SOLARIS)
+      set(PTHREAD_CFLAGS "-D_REENTRANT")
+      set(PTHREAD_LDFLAGS "-pthread -lposix4")
+    elseif(SYSV5)
+      set(PTHREAD_CFLAGS "-D_REENTRANT -Kthread")
+      set(PTHREAD_LDFLAGS "")
+    elseif(AIX)
+      set(PTHREAD_CFLAGS "-D_REENTRANT -mthreads")
+      set(PTHREAD_LDFLAGS "-pthread")
+    elseif(HPUX)
+      set(PTHREAD_CFLAGS "-D_REENTRANT")
+      set(PTHREAD_LDFLAGS "-L/usr/lib -pthread")
+    elseif(HAIKU)
+      set(PTHREAD_CFLAGS "-D_REENTRANT")
+      set(PTHREAD_LDFLAGS "")
+    else()
+      set(PTHREAD_CFLAGS "-D_REENTRANT")
+      set(PTHREAD_LDFLAGS "-lpthread")
+    endif()
+
+    # Run some tests
+    set(ORIG_CMAKE_REQUIRED_FLAGS "${CMAKE_REQUIRED_FLAGS}")
+    set(CMAKE_REQUIRED_FLAGS "${CMAKE_REQUIRED_FLAGS} ${PTHREAD_CFLAGS} ${PTHREAD_LDFLAGS}")
     if(CMAKE_CROSSCOMPILING)
-      check_c_source_compiles("
-        #include <pthread.h>
-        int main(int argc, char** argv) {
-          pthread_attr_t type;
-          pthread_attr_init(&type);
-          return 0;
-        }" HAVE_PTHREADS)
+      set(HAVE_PTHREADS 1)
     else()
       check_c_source_runs("
         #include <pthread.h>
@@ -840,8 +857,10 @@ macro(CheckPTHREAD)
     endif()
     if(HAVE_PTHREADS)
       set(SDL_THREAD_PTHREAD 1)
-      # Urho3D - we configure to use "-pthread" compiler flags globally and expect the respective compiler toolchain to do the right things automatically
-      set(SDL_CFLAGS "${SDL_CFLAGS} -pthread")
+      list(APPEND EXTRA_CFLAGS ${PTHREAD_CFLAGS})
+      list(APPEND EXTRA_LDFLAGS ${PTHREAD_LDFLAGS})
+      set(SDL_CFLAGS "${SDL_CFLAGS} ${PTHREAD_CFLAGS}")
+      list(APPEND SDL_LIBS ${PTHREAD_LDFLAGS})
 
       check_c_source_compiles("
         #include <pthread.h>
@@ -902,7 +921,7 @@ macro(CheckPTHREAD)
       endif()
       set(HAVE_SDL_THREADS TRUE)
     endif()
-    set(CMAKE_REQUIRED_FLAGS ${ORIG_CMAKE_REQUIRED_FLAGS})
+    set(CMAKE_REQUIRED_FLAGS "${ORIG_CMAKE_REQUIRED_FLAGS}")
   endif()
 endmacro()
 
@@ -913,8 +932,6 @@ endmacro()
 # USB_LIBS
 # USB_CFLAGS
 macro(CheckUSBHID)
-  # Urho3D - no fix required - all these checks appear to be for BSD only, assume only native build
-  #          Cannot fix them for X-compiling anyway as we/I don't have the necessary means to verify the changes
   check_library_exists(usbhid hid_init "" LIBUSBHID)
   if(LIBUSBHID)
     check_include_file(usbhid.h HAVE_USBHID_H)
@@ -942,7 +959,8 @@ macro(CheckUSBHID)
     endif()
   endif()
 
-  set(CMAKE_REQUIRED_FLAGS "${USB_CFLAGS} ${ORIG_CMAKE_REQUIRED_FLAGS}")
+  set(ORIG_CMAKE_REQUIRED_FLAGS "${CMAKE_REQUIRED_FLAGS}")
+  set(CMAKE_REQUIRED_FLAGS "${CMAKE_REQUIRED_FLAGS} ${USB_CFLAGS}")
   set(CMAKE_REQUIRED_LIBRARIES "${USB_LIBS}")
   check_c_source_compiles("
        #include <sys/types.h>
@@ -1043,7 +1061,7 @@ macro(CheckUSBHID)
     set(HAVE_SDL_JOYSTICK TRUE)
 
     set(CMAKE_REQUIRED_LIBRARIES)
-    set(CMAKE_REQUIRED_FLAGS ${ORIG_CMAKE_REQUIRED_FLAGS})
+    set(CMAKE_REQUIRED_FLAGS "${ORIG_CMAKE_REQUIRED_FLAGS}")
   endif()
 endmacro()
 
@@ -1082,16 +1100,33 @@ endmacro()
 # - n/a
 macro(CheckRPI)
   if(VIDEO_RPI)
-    # Urho3D - bug fix - commented out CMAKE_REQUIRED_LIBRARIES as it actually causes the detection to fail
+    pkg_check_modules(VIDEO_RPI bcm_host brcmegl)
+    if (NOT VIDEO_RPI_FOUND)
+      set(VIDEO_RPI_INCLUDE_DIRS "/opt/vc/include" "/opt/vc/include/interface/vcos/pthreads" "/opt/vc/include/interface/vmcs_host/linux/" )
+      set(VIDEO_RPI_LIBRARY_DIRS "/opt/vc/lib" )
+      set(VIDEO_RPI_LIBRARIES bcm_host )
+      set(VIDEO_RPI_LDFLAGS "-Wl,-rpath,/opt/vc/lib")
+    endif()
+    listtostr(VIDEO_RPI_INCLUDE_DIRS VIDEO_RPI_INCLUDE_FLAGS "-I")
+    listtostr(VIDEO_RPI_LIBRARY_DIRS VIDEO_RPI_LIBRARY_FLAGS "-L")
+
+    set(ORIG_CMAKE_REQUIRED_FLAGS "${CMAKE_REQUIRED_FLAGS}")
+    set(CMAKE_REQUIRED_FLAGS "${CMAKE_REQUIRED_FLAGS} ${VIDEO_RPI_INCLUDE_FLAGS} ${VIDEO_RPI_LIBRARY_FLAGS}")
+    set(CMAKE_REQUIRED_LIBRARIES "${VIDEO_RPI_LIBRARIES}")
     check_c_source_compiles("
         #include <bcm_host.h>
         int main(int argc, char **argv) {}" HAVE_VIDEO_RPI)
+    set(CMAKE_REQUIRED_FLAGS "${ORIG_CMAKE_REQUIRED_FLAGS}")
+    set(CMAKE_REQUIRED_LIBRARIES)
+
     if(SDL_VIDEO AND HAVE_VIDEO_RPI)
       set(HAVE_SDL_VIDEO TRUE)
       set(SDL_VIDEO_DRIVER_RPI 1)
       file(GLOB VIDEO_RPI_SOURCES ${SDL2_SOURCE_DIR}/src/video/raspberry/*.c)
       set(SOURCE_FILES ${SOURCE_FILES} ${VIDEO_RPI_SOURCES})
-      list (APPEND EXTRA_LIBS bcm_host)
+      list(APPEND EXTRA_LIBS ${VIDEO_RPI_LIBRARIES})
+      set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${VIDEO_RPI_INCLUDE_FLAGS} ${VIDEO_RPI_LIBRARY_FLAGS}")
+      list(APPEND EXTRA_LDFLAGS ${VIDEO_RPI_LDFLAGS})
     endif(SDL_VIDEO AND HAVE_VIDEO_RPI)
   endif(VIDEO_RPI)
 endmacro(CheckRPI)
@@ -1104,16 +1139,21 @@ endmacro(CheckRPI)
 # - HAVE_DLOPEN opt
 macro(CheckKMSDRM)
   if(VIDEO_KMSDRM)
-    # Urho3D - bug fix - do not use pkg-config tool for detection as it only works for host environment and not for rooted environment when cross-compiling
-    find_package (DirectRenderingManager)
-    find_package (GenericBufferManagement)
-    if(DRM_FOUND AND GBM_FOUND)
-      include_directories (SYSTEM ${DRM_INCLUDE_DIRS} ${GBM_INCLUDE_DIRS})
+    pkg_check_modules(KMSDRM libdrm gbm egl)
+    if(KMSDRM_FOUND)
+      link_directories(
+        ${KMSDRM_LIBRARY_DIRS}
+      )
+      include_directories(
+        ${KMSDRM_INCLUDE_DIRS}
+      )
       set(HAVE_VIDEO_KMSDRM TRUE)
       set(HAVE_SDL_VIDEO TRUE)
 
       file(GLOB KMSDRM_SOURCES ${SDL2_SOURCE_DIR}/src/video/kmsdrm/*.c)
       set(SOURCE_FILES ${SOURCE_FILES} ${KMSDRM_SOURCES})
+
+      list(APPEND EXTRA_CFLAGS ${KMSDRM_CFLAGS})
 
       set(SDL_VIDEO_DRIVER_KMSDRM 1)
 
@@ -1121,14 +1161,14 @@ macro(CheckKMSDRM)
         if(NOT HAVE_DLOPEN)
           message_warn("You must have SDL_LoadObject() support for dynamic KMS/DRM loading")
         else()
-          get_soname (DRM_LIB_SONAME DRM_LIBRARIES)
-          get_soname (GBM_LIB_SONAME GBM_LIBRARIES)
+          FindLibraryAndSONAME(drm)
+          FindLibraryAndSONAME(gbm)
           set(SDL_VIDEO_DRIVER_KMSDRM_DYNAMIC "\"${DRM_LIB_SONAME}\"")
           set(SDL_VIDEO_DRIVER_KMSDRM_DYNAMIC_GBM "\"${GBM_LIB_SONAME}\"")
           set(HAVE_KMSDRM_SHARED TRUE)
         endif()
       else()
-        list (APPEND EXTRA_LIBS drm gbm)
+        set(EXTRA_LIBS ${KMSDRM_LIBRARIES} ${EXTRA_LIBS})
       endif()
     endif()
   endif()
